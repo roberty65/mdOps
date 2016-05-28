@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>System Metrics Monitoring 1.0</title>
+
+<style>
+
+body {
+	font: 10px sans-serif;
+}
+
+.axis path,
+.axis line {
+	fill: none;
+	stroke: #000;
+	shape-rendering: crispEdges;
+}
+
+.line {
+	fill: none;
+	stroke: steelblue;
+	stroke-width: 1.5px;
+}
+
+.indicator {
+	fill: none;
+	stroke: red;
+	stroke-width: 2px;
+}
+
+.title text,
+.subtitle text {
+	text-anchor: center;
+}
+
+</style>
+
+<body>
+
+<div id="header">TODO: header</div>
+<div id="leftTree">TODO: left-org-tree</div>
+<div id="rightTop">TODO: right-top</div>
+<div id="charts"></div>
+
+<script src="js/d3.js" charset="utf-8"></script>
+<script>
+
+var margin = { top: 20, right: 20, bottom: 20, left: 50},
+    gap = 30,
+    width = 960 - margin.left - margin.right,
+    height = 200 - margin.top - margin.bottom,
+    titleHeight = 20, subTitleHeight = 18;
+
+var parseDate = d3.time.format("%Y-%m-%d %H:%M:%S").parse;
+
+var x = d3.time.scale().range([0, width]);
+
+var xAxis = d3.svg.axis().scale(x).orient("bottom").tickFormat(d3.time.format.multi([
+		["%H:%M", function(d) { return d.getHours() + d.getMinutes(); }],
+		["%Y-%m-%d", function(d) { return true; }]
+	])); 
+
+var gData;
+var gCharts = [];	// why new Array() is a bad practice?
+
+function onMouseOver() {
+//	console.log("on-mouse-over");
+	gCharts.forEach(function(c) { if (c.onMouseOver) c.onMouseOver(); });
+} 
+
+function onMouseMove() {
+//	console.log("on-mouse-move");
+	gCharts.forEach(function(c) { if (c.onMouseMove) c.onMouseMove(); }); 
+}
+
+function onMouseOut() {
+//	console.log("on-mouse-out");
+	gCharts.forEach(function(c) { if (c.onMouseOut) c.onMouseOut(); });
+}
+
+function drawCpuChart(i, svg, data)
+{
+	var color = d3.scale.category20();
+	var y = d3.scale.linear().range([height, 0]);
+	var yAxis = d3.svg.axis().scale(y).orient("left").tickFormat(d3.format(".0%"));
+
+	var area = d3.svg.area()
+		.x(function(d) { return x(d.date); })
+		.y0(function(d) { return y(d.y0); })
+		.y1(function(d) { return y(d.y0 + d.y); });
+
+	var stack = d3.layout.stack()
+		.values(function(d) { return d.values; });
+
+	color.domain(d3.keys(data.stats[0].data[i].values));
+	data.stats.forEach(function(d) {
+			d.date = parseDate(d.dtime);
+	});
+
+	// TODO: max cpu
+
+	var maxCpu = d3.max(data.stats.map(function(d) {
+			if (!d.data[i]) return 0;
+			return d.data[i].values.usr+d.data[i].values.sys
+				+d.data[i].values.idl+d.data[i].values.wt;
+	}));
+	
+	var cntCpu = Math.round(maxCpu / 6000);
+	var cpuTotal = 6000;// TODO: use span to calculate out tickets per span
+
+	var cpuData = stack(color.domain().map(function(name) {
+		return {
+			name: name,
+			values: data.stats.map(function(d) {
+				if (!d.data[i]) return {date: d.date, y: 0};
+				return {date: d.date, y: d.data[i].values[name] / cpuTotal};
+			})
+		};
+	}));
+
+	x.domain(d3.extent(data.stats, function(d) { return d.date; }));
+	y.domain([0,cntCpu]);
+
+	var tsvg = svg.append("g").append("text")
+		.attr("transform", "translate(0," + 0 + ")")
+		.attr("y", 0)
+		.attr("x", 0)
+		.attr("dy", ".71em")
+		.style("text-anchor", "start")
+		.text("CPU-total");
+
+	var container = svg.append("g")
+		.attr("wdith", width)
+		.attr("height", height);
+	container.on("mouseover", onMouseOver)
+		.on("mousemove", onMouseMove)
+		.on("mouseout", onMouseOut);
+
+	var chart = container.selectAll(".cpuChart")
+		.data(cpuData)
+		.enter().append("g")
+		.attr("transform", "translate(0," + titleHeight + ")")
+		.attr("class", "cpuChart");
+	chart.append("path")
+		.attr("class", "area")
+		.attr("d", function(d) { return area(d.values); })
+		.style("fill", function(d) { return color(d.name); });
+	
+	svg.append("g")
+		.attr("class", "x axis")
+		.attr("transform", "translate(0," + (height + titleHeight) + ")")
+		.call(xAxis);
+
+	svg.append("g")
+		.attr("transform", "translate(0," + (titleHeight) + ")")
+		.attr("class", "y axis")
+		.call(yAxis);
+
+	var vi = svg.append("line")
+		.attr("class", "indicator")
+		.attr("opacity", 1.0)
+		.attr("x1", 0)
+		.attr("y1", titleHeight)
+		.attr("x2", 0)
+		.attr("y2", titleHeight + height);
+
+	gCharts[i] = { vIndicator: vi, svg: container };
+	gCharts[i].onMouseOver = function() {
+		var pos = d3.mouse(gCharts[i].svg[0][0]);
+		console.log("cpu-chart: mouse-over: x=" + pos[0]);
+		gCharts[i].vIndicator.attr("opacity", 1.0)
+			.attr("x1", pos[0])
+			.attr("x2", pos[0]);
+		d3.event.preventDefault();
+	};
+	gCharts[i].onMouseMove = function() {
+		var pos = d3.mouse(gCharts[i].svg[0][0]);
+		console.log("cpu-chart: mouse-move: x=" + pos[0]);
+		gCharts[i].vIndicator.attr("opacity", 1.0)
+			.attr("x1", pos[0])
+			.attr("x2", pos[0]);
+		var d = x.invert(pos[0]);
+		console.log("date=" + d);
+		for (j = 0; j < data.stats.length; ++j) {
+			if (data.stats[j].date.getTime() >= d.getTime()) {
+				var s; cpuData.forEach(function(d) {
+					s = (s ? s + " " : "") + d.name + ": " + (d.values[j].y*100).toFixed(2) + "%";
+				});
+				
+				tsvg.text(s);
+				break;
+			}
+		}
+
+		d3.event.preventDefault();
+	};
+	gCharts[i].onMouseOut = function() {
+		var pos = d3.mouse(gCharts[i].svg[0][0]);
+		console.log("cpu-chart: mouse-out: x=" + pos[0]);
+		gCharts[i].vIndicator.attr("opacity", 0.0)
+			.attr("x1", 100)
+			.attr("x2", 100);
+		d3.event.preventDefault();
+	};
+};
+
+function drawMemChart(i, svg, data)
+{
+	var color = d3.scale.category20();
+	var y = d3.scale.linear().range([height, 0]);
+	var yAxis = d3.svg.axis().scale(y).orient("left").tickFormat(d3.format(".0s"));
+
+	var area = d3.svg.area()
+		.x(function(d) { return x(d.date); })
+		.y0(function(d) { return y(d.y0); })
+		.y1(function(d) { return y(d.y0 + d.y); });
+
+	var stack = d3.layout.stack()
+		.values(function(d) { return d.values; });
+
+	color.domain(d3.keys(data.stats[0].data[i].values));
+	data.stats.forEach(function(d) {
+		d.date = parseDate(d.dtime);
+	});
+
+	var memData = stack(color.domain().map(function(name) {
+		return {
+			name: name,
+			values: data.stats.map(function(d) {
+				return {date: d.date, y: d.data[i].values[name]};
+			})
+		};
+	}));
+
+	var max = d3.max(data.stats.map(function(d) {
+		return d.data[i].values.free + d.data[i].values.cached
+			 + d.data[i].values.buffers + d.data[i].values.used;
+	}));
+
+	x.domain(d3.extent(data.stats, function(d) { return d.date; }));
+	y.domain([0, max]);
+
+	svg.on("mouseover", onMouseOver)
+		.on("mousemove", onMouseMove)
+		.on("mouseout", onMouseOut);
+
+	var chart = svg.selectAll(".memChart")
+		.data(memData)
+		.enter().append("g")
+		.attr("transform", "translate(0," + titleHeight + ")")
+		.attr("class", "memChart");
+	chart.append("path")
+		.attr("class", "area")
+		.attr("d", function(d) { return area(d.values); })
+		.style("fill", function(d) { return color(d.name); });
+	
+	svg.append("g")
+		.attr("class", "x axis")
+		.attr("transform", "translate(0," + (titleHeight + height) + ")")
+		.call(xAxis);
+
+	svg.append("g")
+		.attr("transform", "translate(0," + (titleHeight) + ")")
+		.attr("class", "y axis")
+		.call(yAxis);
+
+	var vi = svg.append("line")
+		.attr("class", "indicator")
+		.attr("opacity", 1.0)
+		.attr("x1", 0)
+		.attr("y1", titleHeight)
+		.attr("x2", 0)
+		.attr("y2", titleHeight + height);
+
+	gCharts[i] = { vIndicator: vi, svg: svg };
+	gCharts[i].onMouseOver = function() {
+		var pos = d3.mouse(gCharts[i].svg[0][0]);
+		gCharts[i].vIndicator.attr("opacity", 1.0)
+			.attr("x1", pos[0])
+			.attr("x2", pos[0]);
+	};
+	gCharts[i].onMouseMove = function() {
+		var pos = d3.mouse(gCharts[i].svg[0][0]);
+		gCharts[i].vIndicator.attr("opacity", 1.0)
+			.attr("x1", pos[0])
+			.attr("x2", pos[0]);
+	};
+	gCharts[i].onMouseOut = function() {
+		var pos = d3.mouse(gCharts[i].svg[0][0]);
+		gCharts[i].vIndicator.attr("opacity", 0.0);
+	};
+};
+
+function drawLoadChart(i, svg, data)
+{
+	var color = d3.scale.category10();
+	var y = d3.scale.linear().range([height, 0]);
+	var yAxis = d3.svg.axis().scale(y).orient("left").tickFormat(d3.format(".0f"));
+
+	var line = d3.svg.line()
+		.interpolate("basis")
+		.x(function(d) { return x(d.date); })
+		.y(function(d) { return y(d.y); })
+
+	color.domain(d3.keys(data.stats[0].data[i].values));
+	data.stats.forEach(function(d) {
+		d.date = parseDate(d.dtime);
+	});
+
+	var loadData = color.domain().map(function(name) {
+		return {
+			name: name,
+			values: data.stats.map(function(d) {
+				return {date: d.date, y: d.data[i].values[name]};
+			})
+		};
+	});
+
+	var max = d3.max(loadData.map(function(d) {
+		return d3.max(d.values.map(function(x) {
+			return x.y;
+		}));
+	}));
+	x.domain(d3.extent(data.stats, function(d) { return d.date; }));
+	y.domain([0, max]);
+
+	svg.on("mouseover", onMouseOver)
+		.on("mousemove", onMouseMove)
+		.on("mouseout", onMouseOut);
+
+	var chart = svg.selectAll(".loadChart")
+		.data(loadData)
+		.enter().append("g")
+		.attr("transform", "translate(0," + titleHeight + ")")
+		.attr("class", "loadChart");
+	chart.append("path")
+		.attr("class", "line")
+		.attr("d", function(d) { return line(d.values); })
+		.style("stroke", function(d) { return color(d.name); });
+	
+	svg.append("g")
+		.attr("class", "x axis")
+		.attr("transform", "translate(0," + (titleHeight + height) + ")")
+		.call(xAxis);
+
+	svg.append("g")
+		.attr("transform", "translate(0," + (titleHeight) + ")")
+		.attr("class", "y axis")
+		.call(yAxis);
+
+	var vi = svg.append("line")
+		.attr("class", "indicator")
+		.attr("opacity", 1.0)
+		.attr("x1", 0)
+		.attr("y1", titleHeight)
+		.attr("x2", 0)
+		.attr("y2", titleHeight + height);
+
+	gCharts[i] = { vIndicator: vi, svg: svg };
+	gCharts[i].onMouseOver = function() {
+		var pos = d3.mouse(gCharts[i].svg[0][0]);
+		gCharts[i].vIndicator.attr("opacity", 1.0)
+			.attr("x1", pos[0])
+			.attr("x2", pos[0]);
+	};
+	gCharts[i].onMouseMove = function() {
+		var pos = d3.mouse(gCharts[i].svg[0][0]);
+		gCharts[i].vIndicator.attr("opacity", 1.0)
+			.attr("x1", pos[0])
+			.attr("x2", pos[0]);
+	};
+	gCharts[i].onMouseOut = function() {
+		var pos = d3.mouse(gCharts[i].svg[0][0]);
+		gCharts[i].vIndicator.attr("opacity", 0.0);
+	};
+};
+
+d3.json("/cgi-bin/systemMetrics.cgi?context=business&group=total&pid=1000&mid=1&iid=cpu-total,mem,load-avg,net-0,disk-24&last=4h&span=0m&width=" + width, function(error, data) {
+	if (error) {
+		console.log("error happed: " + error);
+		throw error;	
+	}
+
+	gData = data;
+	console.log("start: " + data.start + ", end: " + data.end + ", span: " + data.span);
+
+	var cntCharts = data.stats[0].data.length;
+	var totalHeight = cntCharts * (titleHeight + height) + (cntCharts - 1) * gap + margin.top + margin.bottom;
+	var svg = d3.select("#charts").append("svg")
+		.attr("width", width + margin.left + margin.right)
+		.attr("height", totalHeight);
+//		.on("mouseover", onMouseOver)
+//		.on("mousemove", onMouseMove)
+//		.on("mouseout", onMouseOut);
+
+	for (i = 0; i < cntCharts; ++i) {
+		console.log("i=" + i);
+		var cs = svg.append("g")
+			     .attr("transform", "translate(" + margin.left + "," + (margin.top + i * (titleHeight + height + gap)) + ")");
+		if (i == 0) {
+			drawCpuChart(i, cs, data);
+		}
+		else if (i == 1) {
+			drawMemChart(i, cs, data);
+		}
+		else if (i == 2) {
+			drawLoadChart(i, cs, data);
+		}
+	}
+});	
+
+window.onresize = function() {
+	console.log("resize.... widht=" + window.width);  
+}
+
+</script>
+</body>
+</html>
